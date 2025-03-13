@@ -1,6 +1,12 @@
 # Pico Light Bulbs Project
 
-This project is designed to control light bulbs using a Raspberry Pi Pico. It includes features such as temperature sensing, human detection, and brightness control using buttons and an infrared remote. To enhance quality of the IR reception, a second Pico is used to receive the IR signals and send them to the main Pico via UART. The project also includes an OLED display to show the current mode of operation.
+This project is designed to control light bulbs using a Raspberry Pi Pico. It includes features such as human detection and brightness control using buttons or an infrared remote. To enhance quality of the IR reception, a second Pico is used to receive the IR signals and send them to the main Pico via UART. The project also includes an OLED display to show the current mode of operation.
+
+## Hardware
+- **Raspberry Pi Pico**: Main microcontroller.
+- **LD2410 Human Sensor**: Human detection sensor.
+- **VS1838B IR Receiver**: For receiving signals from an infrared remote control (on a second Pico).
+- **SSD1306 OLED Display**: For displaying information.
 
 ## Project Structure
 
