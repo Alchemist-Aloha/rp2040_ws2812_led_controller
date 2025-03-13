@@ -1,6 +1,6 @@
 # Pico Light Bulbs Project
 
-This Micropython project is designed to control light bulbs using a Raspberry Pi Pico. It includes features such as human detection and brightness control using buttons or an infrared remote. To enhance quality of the IR reception, a [second Pico](https://github.com/Alchemist-Aloha/pico_ir_receiver) is used to receive the IR signals and send them to the main Pico via UART. The project also includes an OLED display to show the current mode of operation.
+This MicroPython project is designed to control light bulbs using a Raspberry Pi Pico. It includes features such as human detection and brightness control using buttons or an infrared remote. To enhance quality of the IR reception, a [second Pico](https://github.com/Alchemist-Aloha/pico_ir_receiver) is used to receive the IR signals and send them to the main Pico via UART. The project also includes an OLED display to show the current mode of operation.
 
 ## Hardware
 - **Raspberry Pi Pico**: Main microcontroller.
