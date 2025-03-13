@@ -6,6 +6,7 @@ This project is designed to control light bulbs using a Raspberry Pi Pico. It in
 - **Raspberry Pi Pico**: Main microcontroller.
 - **LD2410 Human Sensor**: Human detection sensor.
 - **SSD1306 OLED Display**: For displaying information.
+- **WS2812 LED Strip**: RGB LED strip.
 
 ## Project Structure
 
