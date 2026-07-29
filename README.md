@@ -33,6 +33,11 @@ daylight, red, green, blue, cyan, magenta, yellow, orange, purple, pink,
 breathing, rainbow wave, rainbow cycle, color chase, theater chase, comet,
 twinkle, fire, ocean wave, forest wave, police, and color wipe.
 
+Selecting **Save** stores the brightness, run mode, and color mode in
+`light_config.json` on the Pico. These settings are loaded automatically on
+the next startup. If the saved file is missing or invalid, the built-in
+defaults are used.
+
 ## License
 
 This project is licensed under the MIT License.

@@ -3,6 +3,8 @@ import neopixel
 import math
 import mp_time as time
 import _thread
+import os
+import ujson
 from ssd1306 import SSD1306_I2C
 import gc
 
@@ -62,6 +64,10 @@ humansensor_read = machine.Pin(14, machine.Pin.IN)
 # Shared variables
 persist_multiplier = 0
 brightness = 1
+color_mode = 0
+
+CONFIG_FILE = "light_config.json"
+CONFIG_TEMP_FILE = "light_config.tmp"
 
 SCREEN_TIMEOUT_MS = 15000
 SCREEN_STATUS_REFRESH_MS = 1000
@@ -100,6 +106,71 @@ COLOR_MODES = (
     "Police",
     "Color wipe",
 )
+
+
+def load_config():
+    """Load saved settings, keeping safe defaults if the file is invalid."""
+    global brightness, persist_multiplier, color_mode
+
+    for filename in (CONFIG_FILE, CONFIG_TEMP_FILE):
+        try:
+            with open(filename, "r") as config_file:
+                config = ujson.load(config_file)
+
+            saved_brightness = config.get("brightness")
+            saved_run_mode = config.get("run_mode")
+            saved_color_mode = config.get("color_mode")
+            if not isinstance(saved_brightness, (int, float)):
+                raise ValueError("invalid brightness")
+            if not 0.05 <= saved_brightness <= 1:
+                raise ValueError("brightness out of range")
+            if saved_run_mode not in (0, 1, 2):
+                raise ValueError("invalid run mode")
+            if not isinstance(saved_color_mode, int):
+                raise ValueError("invalid color mode")
+            if not 0 <= saved_color_mode < len(COLOR_MODES):
+                raise ValueError("color mode out of range")
+
+            brightness = round(saved_brightness, 2)
+            persist_multiplier = saved_run_mode
+            color_mode = saved_color_mode
+            print("Loaded settings from", filename)
+            return
+        except OSError:
+            pass
+        except (ValueError, TypeError) as error:
+            print("Ignoring invalid settings in", filename, ":", error)
+
+
+def save_config():
+    """Save committed settings using a temporary file for safer updates."""
+    config = {
+        "brightness": brightness,
+        "run_mode": persist_multiplier,
+        "color_mode": color_mode,
+    }
+    try:
+        try:
+            os.remove(CONFIG_TEMP_FILE)
+        except OSError:
+            pass
+        with open(CONFIG_TEMP_FILE, "w") as config_file:
+            ujson.dump(config, config_file)
+
+        try:
+            os.remove(CONFIG_FILE)
+        except OSError:
+            pass
+        os.rename(CONFIG_TEMP_FILE, CONFIG_FILE)
+        print("Settings saved")
+        return True
+    except OSError as error:
+        print("Error saving settings:", error)
+        return False
+
+
+load_config()
+
 STATIC_COLORS = (
     (255, 170, 80),   # Soft white
     (210, 230, 255),  # Daylight
@@ -129,7 +200,6 @@ ui_view = UI_HOME
 main_menu_index = 0
 brightness_draft = brightness
 run_mode_draft = persist_multiplier
-color_mode = 0
 color_mode_draft = color_mode
 ui_revision = 0
 
@@ -177,6 +247,7 @@ def handle_ui_button(button_number):
             brightness_draft = round(max(0.05, brightness_draft - 0.05), 2)
         elif button_number == 3:
             brightness = brightness_draft
+            save_config()
             ui_view = UI_MAIN_MENU
             print("Brightness:", int(brightness * 100), "%")
         elif button_number == 4:
@@ -190,6 +261,7 @@ def handle_ui_button(button_number):
             run_mode_draft = (run_mode_draft + 1) % 3
         elif button_number == 3:
             persist_multiplier = run_mode_draft
+            save_config()
             ui_view = UI_MAIN_MENU
             print("Run mode:", mode_name(persist_multiplier))
         elif button_number == 4:
@@ -203,6 +275,7 @@ def handle_ui_button(button_number):
             color_mode_draft = (color_mode_draft + 1) % len(COLOR_MODES)
         elif button_number == 3:
             color_mode = color_mode_draft
+            save_config()
             ui_view = UI_MAIN_MENU
             print("Color mode:", COLOR_MODES[color_mode])
         elif button_number == 4:
