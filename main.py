@@ -56,56 +56,84 @@ humansensor_read = machine.Pin(14, machine.Pin.IN)
 # Shared variables
 persist_multiplier = 0
 brightness = 1
-lock = _thread.allocate_lock()
+
+IR_NONE = "0x000000"
+IR_TOGGLE = "0xffa25d"
+IR_BRIGHTER = "0xff02fd"
+IR_DIMMER = "0xff9867"
+IR_SENSOR_MODE = "0xffa857"
+IR_COMMANDS = (IR_TOGGLE, IR_BRIGHTER, IR_DIMMER, IR_SENSOR_MODE)
+
+
+def apply_control(command):
+    """Apply one button/remote command and report whether it was recognized."""
+    global persist_multiplier, brightness
+
+    if command == IR_TOGGLE:
+        # Enter always-on first, then alternate between always-on and always-off.
+        persist_multiplier = 2 if persist_multiplier == 1 else 1
+        print("Toggled on/off")
+    elif command == IR_BRIGHTER:
+        brightness = min(1, brightness * 1.6)
+        print("Increase brightness")
+    elif command == IR_DIMMER:
+        brightness = max(0.05, brightness * 0.625)
+        print("Decrease brightness")
+    elif command == IR_SENSOR_MODE:
+        persist_multiplier = 0
+        print("Human sensor mode")
+    else:
+        return False
+    return True
 
 
 def button_control():
-    global persist_multiplier, brightness
-    irValue = "0x000000"
+    ir_value = IR_NONE
+    uart_buffer = ""
     last_button_time = 0
     debounce_time = 200  # ms
+    buttons = (
+        (button_4, IR_TOGGLE),
+        (button_1, IR_BRIGHTER),
+        (button_2, IR_DIMMER),
+        (button_3, IR_SENSOR_MODE),
+    )
+    previous_values = [button.value() for button, _ in buttons]
 
     while True:
         current_time = time.ticks_ms()
-        button_pressed = False
 
-        # Read UART more efficiently
+        # Preserve partial UART reads; UART data may arrive in several chunks.
         if uart0.any():
             try:
-                irValue = uart0.read().decode().strip()
+                chunk = uart0.read()
+                if chunk:
+                    uart_buffer = (uart_buffer + chunk.decode().lower())[-64:]
+                    for command in IR_COMMANDS:
+                        if command in uart_buffer:
+                            ir_value = command
+                            uart_buffer = ""
+                            break
             except UnicodeDecodeError:
-                irValue = "0x000000"
+                uart_buffer = ""
 
-        # Only process button inputs if debounce time has passed
+        current_values = [button.value() for button, _ in buttons]
+        command = ir_value if ir_value in IR_COMMANDS else None
+
+        # Trigger physical buttons only on the pressed edge. This prevents a
+        # held mode button from toggling repeatedly every debounce interval.
+        if command is None:
+            for index, (_, button_command) in enumerate(buttons):
+                if previous_values[index] == 1 and current_values[index] == 0:
+                    command = button_command
+                    break
+
         if time.ticks_diff(current_time, last_button_time) > debounce_time:
-            if button_4.value() == 0 or irValue == "0xffa25d":
-                persist_multiplier = 1 if persist_multiplier == 2 else 2
-                button_pressed = True
-                print("Toggled on/off")
-                irValue = "0x000000"
-
-            elif button_1.value() == 0 or irValue == "0xff02fd":
-                brightness = min(1, brightness * 1.6)
-                button_pressed = True
-                print("Increase brightness")
-                irValue = "0x000000"
-
-            elif button_2.value() == 0 or irValue == "0xff9867":
-                brightness = max(0.05, brightness * 0.625)
-                button_pressed = True
-                print("Decrease brightness")
-                irValue = "0x000000"
-
-            elif button_3.value() == 0 or irValue == "0xffa857":
-                persist_multiplier = 0
-                button_pressed = True
-                print("Human sensor mode")
-                irValue = "0x000000"
-
-            if button_pressed:
+            if command is not None and apply_control(command):
                 last_button_time = current_time
+                ir_value = IR_NONE
 
-        # Small sleep to prevent CPU hogging
+        previous_values = current_values
         time.sleep_ms(10)
 
 
@@ -116,16 +144,25 @@ def led_loop():
     led_buffer = [(0, 0, 0)] * NUM_LEDS  # Pre-allocate buffer
 
     while True:
-        temperature = ReadTemperature() - 5
-        current_state = (
-            humansensor_read.value() == 1 and persist_multiplier == 0
-        ) or persist_multiplier == 1
+        try:
+            temperature = ReadTemperature() - 5
+            human_detected = humansensor_read.value() == 1
+        except Exception as e:
+            print("Error reading sensors:", e)
+            time.sleep_ms(100)
+            continue
 
+        current_state = (
+            human_detected and persist_multiplier == 0
+        ) or persist_multiplier == 1
+        state_changed = previous_state != current_state
+
+        # A display failure must not prevent the lights from operating.
         try:
             # Only update OLED if state changes or every 50 iterations (reduces I2C traffic)
-            if t % 50 == 0 or previous_state != current_state:
+            if t % 50 == 0 or state_changed:
                 oled.fill(0)
-                if humansensor_read.value() == 1 and persist_multiplier == 0:
+                if human_detected and persist_multiplier == 0:
                     oled.text("Human Detected", 0, 20)
                 elif persist_multiplier == 1:
                     oled.text("Always on", 0, 20)
@@ -137,8 +174,10 @@ def led_loop():
                 if current_state:
                     oled.text("Power: " + str(int(brightness * 100)) + "%", 0, 30)
                 oled.show()
-                previous_state = current_state
+        except Exception as e:
+            print("Error updating display:", e)
 
+        try:
             # Calculate values once for LED updates
             if current_state:  # Human detected or always on
                 breath = 0.8 + 0.2 * math.sin(t * math.pi / 400)
@@ -154,20 +193,20 @@ def led_loop():
                 # Update all LEDs at once
                 for i in range(NUM_LEDS):
                     led[i] = led_buffer[i]
-            elif (
-                not (t % 5) or previous_state != current_state
-            ):  # Only update LEDs when needed
+            elif not (t % 5) or state_changed:
                 for i in range(NUM_LEDS):
                     led[i] = (0, 0, 0)
+            led.write()
         except Exception as e:
             print("Error updating LEDs:", e)
+
+        previous_state = current_state
 
         # Add periodic garbage collection in your main loop
         if t % 1000 == 0:
             gc.collect()
         t += 1
 
-        led.write()
         time.sleep_ms(2)
 
 
