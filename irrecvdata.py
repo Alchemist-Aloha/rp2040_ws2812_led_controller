@@ -1,5 +1,5 @@
 import machine
-import utime
+import mp_time as utime
 import micropython
 
 class irGetCMD(object):

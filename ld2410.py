@@ -1,5 +1,5 @@
 import struct
-import time
+import mp_time as time
 from micropython import const
 import binascii
 

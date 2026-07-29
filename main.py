@@ -1,7 +1,7 @@
 import machine
 import neopixel
 import math
-import time
+import mp_time as time
 import _thread
 from ssd1306 import SSD1306_I2C
 import gc
@@ -44,7 +44,7 @@ def ReadTemperature():
 
 # Display and LED setup
 led = neopixel.NeoPixel(machine.Pin(PIN_LED), NUM_LEDS, bpp=3)
-i2c_1 = machine.I2C(id=1, sda=machine.Pin(OLED_SDA), scl=machine.Pin(OLED_SCL))
+i2c_1 = machine.I2C(1, sda=machine.Pin(OLED_SDA), scl=machine.Pin(OLED_SCL))
 oled = SSD1306_I2C(128, 64, i2c_1)
 oled.fill(1)
 oled.show()
@@ -57,6 +57,12 @@ humansensor_read = machine.Pin(14, machine.Pin.IN)
 persist_multiplier = 0
 brightness = 1
 
+SCREEN_TIMEOUT_MS = 15000
+UI_HOME = 0
+UI_MAIN_MENU = 1
+UI_BRIGHTNESS = 2
+UI_RUN_MODE = 3
+
 IR_NONE = "0x000000"
 IR_TOGGLE = "0xffa25d"
 IR_BRIGHTER = "0xff02fd"
@@ -64,27 +70,119 @@ IR_DIMMER = "0xff9867"
 IR_SENSOR_MODE = "0xffa857"
 IR_COMMANDS = (IR_TOGGLE, IR_BRIGHTER, IR_DIMMER, IR_SENSOR_MODE)
 
+# UI state is written by the button core and read by the display core. Each
+# assignment is atomic on MicroPython, and ui_revision requests a redraw.
+screen_on = True
+last_ui_action_time = time.ticks_ms()
+ui_view = UI_HOME
+main_menu_index = 0
+brightness_draft = brightness
+run_mode_draft = persist_multiplier
+ui_revision = 0
 
-def apply_control(command):
-    """Apply one button/remote command and report whether it was recognized."""
-    global persist_multiplier, brightness
 
-    if command == IR_TOGGLE:
-        # Enter always-on first, then alternate between always-on and always-off.
-        persist_multiplier = 2 if persist_multiplier == 1 else 1
-        print("Toggled on/off")
-    elif command == IR_BRIGHTER:
-        brightness = min(1, brightness * 1.6)
-        print("Increase brightness")
-    elif command == IR_DIMMER:
-        brightness = max(0.05, brightness * 0.625)
-        print("Decrease brightness")
-    elif command == IR_SENSOR_MODE:
-        persist_multiplier = 0
-        print("Human sensor mode")
-    else:
-        return False
+def handle_ui_button(button_number):
+    """Handle one UI button press. Returns True when the press only wakes OLED."""
+    global screen_on, last_ui_action_time, ui_view, main_menu_index
+    global brightness_draft, run_mode_draft, brightness, persist_multiplier
+    global ui_revision
+
+    last_ui_action_time = time.ticks_ms()
+    if not screen_on:
+        screen_on = True
+        ui_revision += 1
+        return True
+
+    if ui_view == UI_HOME:
+        if button_number in (1, 2, 3):
+            ui_view = UI_MAIN_MENU
+            if button_number == 2:
+                main_menu_index = 1
+
+    elif ui_view == UI_MAIN_MENU:
+        if button_number == 1:
+            main_menu_index = (main_menu_index - 1) % 2
+        elif button_number == 2:
+            main_menu_index = (main_menu_index + 1) % 2
+        elif button_number == 3:
+            if main_menu_index == 0:
+                brightness_draft = brightness
+                ui_view = UI_BRIGHTNESS
+            else:
+                run_mode_draft = persist_multiplier
+                ui_view = UI_RUN_MODE
+        elif button_number == 4:
+            ui_view = UI_HOME
+
+    elif ui_view == UI_BRIGHTNESS:
+        if button_number == 1:
+            brightness_draft = round(min(1, brightness_draft + 0.05), 2)
+        elif button_number == 2:
+            brightness_draft = round(max(0.05, brightness_draft - 0.05), 2)
+        elif button_number == 3:
+            brightness = brightness_draft
+            ui_view = UI_MAIN_MENU
+            print("Brightness:", int(brightness * 100), "%")
+        elif button_number == 4:
+            brightness_draft = brightness
+            ui_view = UI_MAIN_MENU
+
+    elif ui_view == UI_RUN_MODE:
+        if button_number == 1:
+            run_mode_draft = (run_mode_draft - 1) % 3
+        elif button_number == 2:
+            run_mode_draft = (run_mode_draft + 1) % 3
+        elif button_number == 3:
+            persist_multiplier = run_mode_draft
+            ui_view = UI_MAIN_MENU
+            print("Run mode:", mode_name(persist_multiplier))
+        elif button_number == 4:
+            run_mode_draft = persist_multiplier
+            ui_view = UI_MAIN_MENU
+
+    ui_revision += 1
     return True
+
+
+def mode_name(mode):
+    if mode == 1:
+        return "Always on"
+    if mode == 2:
+        return "Always off"
+    return "Human detect"
+
+
+def draw_ui(temperature):
+    """Draw the current UI into the framebuffer; caller sends it with show()."""
+    oled.fill(0)
+
+    if ui_view == UI_HOME:
+        oled.text("Light Control", 0, 0)
+        oled.text("Mode:", 0, 16)
+        oled.text(mode_name(persist_multiplier), 40, 16)
+        oled.text("Brightness: " + str(round(brightness * 100)) + "%", 0, 28)
+        oled.text("Temp: " + str(temperature) + "C", 0, 40)
+        oled.text("B3: Menu", 0, 56)
+
+    elif ui_view == UI_MAIN_MENU:
+        oled.text("Main Menu", 0, 0)
+        oled.text(("> " if main_menu_index == 0 else "  ") + "Brightness", 0, 18)
+        oled.text(("> " if main_menu_index == 1 else "  ") + "Run mode", 0, 30)
+        oled.text("B3 Select B4 Back", 0, 52)
+
+    elif ui_view == UI_BRIGHTNESS:
+        oled.text("Brightness", 0, 0)
+        oled.text(str(round(brightness_draft * 100)) + "%", 48, 20)
+        oled.text("B1 +     B2 -", 0, 38)
+        oled.text("B3 Save B4 Back", 0, 54)
+
+    elif ui_view == UI_RUN_MODE:
+        oled.text("Run mode", 0, 0)
+        modes = ("Human detect", "Always on", "Always off")
+        for index in range(3):
+            marker = "> " if run_mode_draft == index else "  "
+            oled.text(marker + modes[index], 0, 16 + index * 12)
+        oled.text("B3 Save B4 Back", 0, 54)
 
 
 def button_control():
@@ -93,11 +191,17 @@ def button_control():
     last_button_time = 0
     debounce_time = 200  # ms
     buttons = (
-        (button_4, IR_TOGGLE),
-        (button_1, IR_BRIGHTER),
-        (button_2, IR_DIMMER),
-        (button_3, IR_SENSOR_MODE),
+        (button_1, 1),
+        (button_2, 2),
+        (button_3, 3),
+        (button_4, 4),
     )
+    remote_buttons = {
+        IR_BRIGHTER: 1,
+        IR_DIMMER: 2,
+        IR_SENSOR_MODE: 3,
+        IR_TOGGLE: 4,
+    }
     previous_values = [button.value() for button, _ in buttons]
 
     while True:
@@ -118,18 +222,18 @@ def button_control():
                 uart_buffer = ""
 
         current_values = [button.value() for button, _ in buttons]
-        command = ir_value if ir_value in IR_COMMANDS else None
+        pressed_button = remote_buttons.get(ir_value)
 
         # Trigger physical buttons only on the pressed edge. This prevents a
         # held mode button from toggling repeatedly every debounce interval.
-        if command is None:
-            for index, (_, button_command) in enumerate(buttons):
+        if pressed_button is None:
+            for index, (_, button_number) in enumerate(buttons):
                 if previous_values[index] == 1 and current_values[index] == 0:
-                    command = button_command
+                    pressed_button = button_number
                     break
 
         if time.ticks_diff(current_time, last_button_time) > debounce_time:
-            if command is not None and apply_control(command):
+            if pressed_button is not None and handle_ui_button(pressed_button):
                 last_button_time = current_time
                 ir_value = IR_NONE
 
@@ -138,9 +242,11 @@ def button_control():
 
 
 def led_loop():
-    global persist_multiplier, brightness
+    global persist_multiplier, brightness, screen_on
     t = 0
     previous_state = -1  # Track previous state
+    rendered_ui_revision = -1
+    display_powered = True
     led_buffer = [(0, 0, 0)] * NUM_LEDS  # Pre-allocate buffer
 
     while True:
@@ -157,23 +263,30 @@ def led_loop():
         ) or persist_multiplier == 1
         state_changed = previous_state != current_state
 
+        if screen_on and time.ticks_diff(
+            time.ticks_ms(), last_ui_action_time
+        ) >= SCREEN_TIMEOUT_MS:
+            screen_on = False
+
         # A display failure must not prevent the lights from operating.
         try:
-            # Only update OLED if state changes or every 50 iterations (reduces I2C traffic)
-            if t % 50 == 0 or state_changed:
-                oled.fill(0)
-                if human_detected and persist_multiplier == 0:
-                    oled.text("Human Detected", 0, 20)
-                elif persist_multiplier == 1:
-                    oled.text("Always on", 0, 20)
-                elif persist_multiplier == 2:
-                    oled.text("Always off", 0, 20)
-                else:
-                    oled.text("No Human Detected", 0, 20)
-                oled.text("Temp: " + str(temperature) + "C", 0, 10)
-                if current_state:
-                    oled.text("Power: " + str(int(brightness * 100)) + "%", 0, 30)
-                oled.show()
+            if not screen_on and display_powered:
+                oled.poweroff()
+                display_powered = False
+            elif screen_on:
+                if not display_powered:
+                    oled.poweron()
+                    display_powered = True
+                    rendered_ui_revision = -1
+
+                if (
+                    t % 50 == 0
+                    or state_changed
+                    or rendered_ui_revision != ui_revision
+                ):
+                    draw_ui(temperature)
+                    oled.show()
+                    rendered_ui_revision = ui_revision
         except Exception as e:
             print("Error updating display:", e)
 

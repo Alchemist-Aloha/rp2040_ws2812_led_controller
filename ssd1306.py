@@ -35,6 +35,12 @@ class SSD1306(framebuf.FrameBuffer):
         super().__init__(self.buffer, self.width, self.height, framebuf.MONO_VLSB)
         self.init_display()
 
+    def write_cmd(self, cmd):
+        raise NotImplementedError
+
+    def write_data(self, buf):
+        raise NotImplementedError
+
     def init_display(self):
         for cmd in (
             SET_DISP | 0x00,  # off
@@ -129,7 +135,7 @@ class SSD1306_SPI(SSD1306):
         self.dc = dc
         self.res = res
         self.cs = cs
-        import time
+        import mp_time as time
 
         self.res(1)
         time.sleep_ms(1)

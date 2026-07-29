@@ -1,3 +1,4 @@
 /.vscode/
 .micropico
 __pycache__/
+ty.toml

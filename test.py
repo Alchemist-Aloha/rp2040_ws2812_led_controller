@@ -33,7 +33,7 @@ def ReadTemperature():
 
 # Display and LED setup
 led = neopixel.NeoPixel(machine.Pin(PIN_LED), NUM_LEDS, bpp=3)
-i2c_1 = machine.I2C(id=1, sda=machine.Pin(OLED_SDA), scl=machine.Pin(OLED_SCL))
+i2c_1 = machine.I2C(1, sda=machine.Pin(OLED_SDA), scl=machine.Pin(OLED_SCL))
 oled = SSD1306_I2C(128, 64, i2c_1)
 oled.fill(1)
 oled.show()
