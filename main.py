@@ -6,6 +6,21 @@ import _thread
 import os
 import ujson
 from ssd1306 import SSD1306_I2C
+from ir_buttons import (
+    IR_NONE,
+    IR_POWER,
+    IR_MENU,
+    IR_PLUS,
+    IR_MINUS,
+    IR_LEFT,
+    IR_RIGHT,
+    IR_PLAY,
+    IR_BACK,
+    IR_1,
+    IR_2,
+    IR_3,
+    IR_4,
+)
 import gc
 
 gc.collect()  # Force garbage collection at startup
@@ -185,13 +200,20 @@ STATIC_COLORS = (
     (255, 20, 100),
 )
 
-IR_NONE = "0x000000"
-IR_POWER = "0xff45ba"
-IR_TOGGLE = "0xffa25d"
-IR_BRIGHTER = "0xff40bf"
-IR_DIMMER = "0xff19e6"
-IR_SENSOR_MODE = "0xffa857"
-IR_COMMANDS = (IR_TOGGLE, IR_BRIGHTER, IR_DIMMER, IR_SENSOR_MODE)
+IR_COMMANDS = (
+    IR_POWER,
+    IR_MENU,
+    IR_PLUS,
+    IR_MINUS,
+    IR_LEFT,
+    IR_RIGHT,
+    IR_PLAY,
+    IR_BACK,
+    IR_1,
+    IR_2,
+    IR_3,
+    IR_4,
+)
 
 # UI state is written by the button core and read by the display core. Each
 # assignment is atomic on MicroPython, and ui_revision requests a redraw.
@@ -352,10 +374,22 @@ def button_control():
         (button_4, 4),
     )
     remote_buttons = {
-        IR_BRIGHTER: 1,
-        IR_DIMMER: 2,
-        IR_SENSOR_MODE: 3,
-        IR_TOGGLE: 4,
+        # Previous / increase
+        IR_LEFT: 1,
+        IR_PLUS: 1,
+        IR_1: 1,
+        # Next / decrease
+        IR_RIGHT: 2,
+        IR_MINUS: 2,
+        IR_2: 2,
+        # Open / select / save
+        IR_PLAY: 3,
+        IR_MENU: 3,
+        IR_3: 3,
+        # Back / cancel
+        IR_BACK: 4,
+        IR_POWER: 4,
+        IR_4: 4,
     }
     previous_values = [button.value() for button, _ in buttons]
 
@@ -370,6 +404,7 @@ def button_control():
                     uart_buffer = (uart_buffer + chunk.decode().lower())[-64:]
                     for command in IR_COMMANDS:
                         if command in uart_buffer:
+                            print("UART0 IR command:", command)
                             ir_value = command
                             uart_buffer = ""
                             break
