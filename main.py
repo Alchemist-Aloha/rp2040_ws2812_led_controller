@@ -70,6 +70,49 @@ UI_HOME = 0
 UI_MAIN_MENU = 1
 UI_BRIGHTNESS = 2
 UI_RUN_MODE = 3
+UI_COLOR_MODE = 4
+
+# Keep names short enough for the 128-pixel OLED.  The first entry preserves
+# the original warm-white animation as the default.
+COLOR_MODES = (
+    "Warm white",
+    "Soft white",
+    "Daylight",
+    "Red",
+    "Green",
+    "Blue",
+    "Cyan",
+    "Magenta",
+    "Yellow",
+    "Orange",
+    "Purple",
+    "Pink",
+    "Breathing",
+    "Rainbow wave",
+    "Rainbow cycle",
+    "Color chase",
+    "Theater chase",
+    "Comet",
+    "Twinkle",
+    "Fire",
+    "Ocean wave",
+    "Forest wave",
+    "Police",
+    "Color wipe",
+)
+STATIC_COLORS = (
+    (255, 170, 80),   # Soft white
+    (210, 230, 255),  # Daylight
+    (255, 0, 0),
+    (0, 255, 0),
+    (0, 0, 255),
+    (0, 255, 255),
+    (255, 0, 255),
+    (255, 220, 0),
+    (255, 80, 0),
+    (145, 0, 255),
+    (255, 20, 100),
+)
 
 IR_NONE = "0x000000"
 IR_TOGGLE = "0xffa25d"
@@ -86,6 +129,8 @@ ui_view = UI_HOME
 main_menu_index = 0
 brightness_draft = brightness
 run_mode_draft = persist_multiplier
+color_mode = 0
+color_mode_draft = color_mode
 ui_revision = 0
 
 
@@ -93,7 +138,7 @@ def handle_ui_button(button_number):
     """Handle one UI button press. Returns True when the press only wakes OLED."""
     global screen_on, last_ui_action_time, ui_view, main_menu_index
     global brightness_draft, run_mode_draft, brightness, persist_multiplier
-    global ui_revision
+    global color_mode, color_mode_draft, ui_revision
 
     last_ui_action_time = time.ticks_ms()
     if not screen_on:
@@ -109,16 +154,19 @@ def handle_ui_button(button_number):
 
     elif ui_view == UI_MAIN_MENU:
         if button_number == 1:
-            main_menu_index = (main_menu_index - 1) % 2
+            main_menu_index = (main_menu_index - 1) % 3
         elif button_number == 2:
-            main_menu_index = (main_menu_index + 1) % 2
+            main_menu_index = (main_menu_index + 1) % 3
         elif button_number == 3:
             if main_menu_index == 0:
                 brightness_draft = brightness
                 ui_view = UI_BRIGHTNESS
-            else:
+            elif main_menu_index == 1:
                 run_mode_draft = persist_multiplier
                 ui_view = UI_RUN_MODE
+            else:
+                color_mode_draft = color_mode
+                ui_view = UI_COLOR_MODE
         elif button_number == 4:
             ui_view = UI_HOME
 
@@ -148,6 +196,19 @@ def handle_ui_button(button_number):
             run_mode_draft = persist_multiplier
             ui_view = UI_MAIN_MENU
 
+    elif ui_view == UI_COLOR_MODE:
+        if button_number == 1:
+            color_mode_draft = (color_mode_draft - 1) % len(COLOR_MODES)
+        elif button_number == 2:
+            color_mode_draft = (color_mode_draft + 1) % len(COLOR_MODES)
+        elif button_number == 3:
+            color_mode = color_mode_draft
+            ui_view = UI_MAIN_MENU
+            print("Color mode:", COLOR_MODES[color_mode])
+        elif button_number == 4:
+            color_mode_draft = color_mode
+            ui_view = UI_MAIN_MENU
+
     ui_revision += 1
     return True
 
@@ -169,14 +230,15 @@ def draw_ui(temperature):
         oled.text("Mode:", 0, 16)
         oled.text(mode_name(persist_multiplier), 40, 16)
         oled.text("Brightness: " + str(round(brightness * 100)) + "%", 0, 28)
-        oled.text("Temp: " + str(temperature) + "C", 0, 40)
-        oled.text("B3: Menu", 0, 56)
+        oled.text("Color: " + COLOR_MODES[color_mode], 0, 40)
+        oled.text("Temp:" + str(temperature) + "C B3 Menu", 0, 54)
 
     elif ui_view == UI_MAIN_MENU:
         oled.text("Main Menu", 0, 0)
-        oled.text(("> " if main_menu_index == 0 else "  ") + "Brightness", 0, 18)
-        oled.text(("> " if main_menu_index == 1 else "  ") + "Run mode", 0, 30)
-        oled.text("B3 Select B4 Back", 0, 52)
+        oled.text(("> " if main_menu_index == 0 else "  ") + "Brightness", 0, 14)
+        oled.text(("> " if main_menu_index == 1 else "  ") + "Run mode", 0, 26)
+        oled.text(("> " if main_menu_index == 2 else "  ") + "Color mode", 0, 38)
+        oled.text("B3 Select B4 Back", 0, 54)
 
     elif ui_view == UI_BRIGHTNESS:
         oled.text("Brightness", 0, 0)
@@ -190,6 +252,17 @@ def draw_ui(temperature):
         for index in range(3):
             marker = "> " if run_mode_draft == index else "  "
             oled.text(marker + modes[index], 0, 16 + index * 12)
+        oled.text("B3 Save B4 Back", 0, 54)
+
+    elif ui_view == UI_COLOR_MODE:
+        oled.text("Color mode", 0, 0)
+        oled.text(
+            str(color_mode_draft + 1) + "/" + str(len(COLOR_MODES)),
+            88,
+            0,
+        )
+        oled.text(COLOR_MODES[color_mode_draft], 0, 22)
+        oled.text("B1 Prev  B2 Next", 0, 40)
         oled.text("B3 Save B4 Back", 0, 54)
 
 
@@ -247,6 +320,100 @@ def button_control():
 
         previous_values = current_values
         time.sleep_ms(10)
+
+
+def color_wheel(position):
+    """Return a full-brightness RGB color for a wheel position from 0 to 255."""
+    position %= 256
+    if position < 85:
+        return (255 - position * 3, position * 3, 0)
+    if position < 170:
+        position -= 85
+        return (0, 255 - position * 3, position * 3)
+    position -= 170
+    return (position * 3, 0, 255 - position * 3)
+
+
+def scaled_color(color, level=1):
+    scale = brightness * level
+    return (
+        int(color[0] * scale),
+        int(color[1] * scale),
+        int(color[2] * scale),
+    )
+
+
+def render_color_mode(frame, led_buffer):
+    """Render the selected color mode into the reusable LED buffer."""
+    mode = color_mode
+    phase = frame // 4
+
+    if mode == 0:  # Original warm-white moving/breathing effect
+        breath = 0.8 + 0.2 * math.sin(frame * math.pi / 400)
+        color = scaled_color((
+            235 - 20 * math.sin(frame * math.pi / 250),
+            100 - 20 * math.sin(frame * math.pi / 200),
+            59 + 10 * math.sin(frame * math.pi / 300),
+        ), breath)
+        for i in range(NUM_LEDS - 1):
+            led_buffer[i] = led_buffer[i + 1]
+        led_buffer[-1] = color
+    elif 1 <= mode <= 11:
+        color = scaled_color(STATIC_COLORS[mode - 1])
+        for i in range(NUM_LEDS):
+            led_buffer[i] = color
+    elif mode == 12:  # Breathing
+        level = 0.12 + 0.88 * (math.sin(frame * math.pi / 250) + 1) / 2
+        color = scaled_color((80, 120, 255), level)
+        for i in range(NUM_LEDS):
+            led_buffer[i] = color
+    elif mode in (13, 14):  # Rainbow wave / rainbow cycle
+        spread = 256 // NUM_LEDS if mode == 13 else 0
+        for i in range(NUM_LEDS):
+            led_buffer[i] = scaled_color(color_wheel(phase + i * spread))
+    elif mode == 15:  # Color chase
+        for i in range(NUM_LEDS):
+            led_buffer[i] = scaled_color(
+                color_wheel(phase * 3 + i * 20) if (i + phase) % 5 == 0
+                else (0, 0, 0)
+            )
+    elif mode == 16:  # Theater chase
+        color = scaled_color(color_wheel(phase))
+        for i in range(NUM_LEDS):
+            led_buffer[i] = color if (i + phase) % 3 == 0 else (0, 0, 0)
+    elif mode == 17:  # Comet
+        head = phase % (NUM_LEDS + 12)
+        for i in range(NUM_LEDS):
+            distance = head - i
+            level = (12 - distance) / 12 if 0 <= distance < 12 else 0
+            led_buffer[i] = scaled_color((80, 180, 255), level)
+    elif mode == 18:  # Deterministic twinkle, no random-module allocation
+        for i in range(NUM_LEDS):
+            sparkle = ((i * 37 + phase * 13) % 101) < 4
+            led_buffer[i] = scaled_color((220, 235, 255), 1 if sparkle else 0.04)
+    elif mode == 19:  # Fire
+        for i in range(NUM_LEDS):
+            flicker = (i * 29 + phase * 17 + (i * phase) % 31) % 100
+            led_buffer[i] = scaled_color((255, 25 + flicker, flicker // 8))
+    elif mode in (20, 21):  # Ocean wave / forest wave
+        base = (0, 90, 255) if mode == 20 else (0, 210, 55)
+        for i in range(NUM_LEDS):
+            level = 0.35 + 0.65 * (
+                math.sin((i * 12 + phase * 3) * math.pi / 128) + 1
+            ) / 2
+            led_buffer[i] = scaled_color(base, level)
+    elif mode == 22:  # Police
+        first_color = (255, 0, 0) if (phase // 8) % 2 == 0 else (0, 0, 255)
+        second_color = (0, 0, 255) if first_color[0] else (255, 0, 0)
+        for i in range(NUM_LEDS):
+            led_buffer[i] = scaled_color(
+                first_color if i < NUM_LEDS // 2 else second_color
+            )
+    else:  # Color wipe
+        wipe_position = phase % (NUM_LEDS * 3)
+        wipe_color = color_wheel((phase // NUM_LEDS) * 85)
+        for i in range(NUM_LEDS):
+            led_buffer[i] = scaled_color(wipe_color) if i <= wipe_position % NUM_LEDS else (0, 0, 0)
 
 
 def led_loop():
@@ -314,19 +481,8 @@ def led_loop():
                 print("Error updating display:", e)
 
         try:
-            # Calculate values once for LED updates
             if current_state:  # Human detected or always on
-                breath = 0.8 + 0.2 * math.sin(t * math.pi / 400)
-                r = int(brightness * breath * (235 - 20 * math.sin(t * math.pi / 250)))
-                g = int(brightness * breath * (100 - 20 * math.sin(t * math.pi / 200)))
-                b = int(brightness * breath * (59 + math.sin(t * math.pi / 300) * 10))
-
-                # Shift pattern (more efficient)
-                for i in range(NUM_LEDS - 1):
-                    led_buffer[i] = led_buffer[i + 1]
-                led_buffer[NUM_LEDS - 1] = (r, g, b)
-
-                # Update all LEDs at once
+                render_color_mode(t, led_buffer)
                 for i in range(NUM_LEDS):
                     led[i] = led_buffer[i]
             elif not (t % 5) or state_changed:
