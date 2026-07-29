@@ -16,6 +16,8 @@ PIN_LED = 15
 NUM_LEDS = 60
 OLED_SDA = 6
 OLED_SCL = 7
+OLED_I2C_FREQ = 400000
+OLED_CONTRAST = 160
 ADC_PIN = 4
 BUTTON_1 = 2
 BUTTON_2 = 3
@@ -44,10 +46,14 @@ def ReadTemperature():
 
 # Display and LED setup
 led = neopixel.NeoPixel(machine.Pin(PIN_LED), NUM_LEDS, bpp=3)
-i2c_1 = machine.I2C(1, sda=machine.Pin(OLED_SDA), scl=machine.Pin(OLED_SCL))
+i2c_1 = machine.I2C(
+    1,
+    sda=machine.Pin(OLED_SDA),
+    scl=machine.Pin(OLED_SCL),
+    freq=OLED_I2C_FREQ,
+)
 oled = SSD1306_I2C(128, 64, i2c_1)
-oled.fill(1)
-oled.show()
+oled.contrast(OLED_CONTRAST)
 oled.fill(0)
 oled.show()
 
@@ -58,6 +64,8 @@ persist_multiplier = 0
 brightness = 1
 
 SCREEN_TIMEOUT_MS = 15000
+SCREEN_STATUS_REFRESH_MS = 1000
+SCREEN_ERROR_RETRY_MS = 1000
 UI_HOME = 0
 UI_MAIN_MENU = 1
 UI_BRIGHTNESS = 2
@@ -246,6 +254,8 @@ def led_loop():
     t = 0
     previous_state = -1  # Track previous state
     rendered_ui_revision = -1
+    last_display_refresh = time.ticks_ms()
+    last_display_error = None
     display_powered = True
     led_buffer = [(0, 0, 0)] * NUM_LEDS  # Pre-allocate buffer
 
@@ -268,27 +278,40 @@ def led_loop():
         ) >= SCREEN_TIMEOUT_MS:
             screen_on = False
 
-        # A display failure must not prevent the lights from operating.
-        try:
-            if not screen_on and display_powered:
-                oled.poweroff()
-                display_powered = False
-            elif screen_on:
-                if not display_powered:
-                    oled.poweron()
-                    display_powered = True
-                    rendered_ui_revision = -1
+        # A display failure must not prevent the lights from operating or cause
+        # a tight I2C retry loop that can keep a failing bus continuously busy.
+        display_retry_ready = (
+            last_display_error is None
+            or time.ticks_diff(time.ticks_ms(), last_display_error)
+            >= SCREEN_ERROR_RETRY_MS
+        )
+        if display_retry_ready:
+            try:
+                if not screen_on and display_powered:
+                    oled.poweroff()
+                    display_powered = False
+                elif screen_on:
+                    if not display_powered:
+                        oled.poweron()
+                        display_powered = True
+                        rendered_ui_revision = -1
 
-                if (
-                    t % 50 == 0
-                    or state_changed
-                    or rendered_ui_revision != ui_revision
-                ):
-                    draw_ui(temperature)
-                    oled.show()
-                    rendered_ui_revision = ui_revision
-        except Exception as e:
-            print("Error updating display:", e)
+                    refresh_due = time.ticks_diff(
+                        time.ticks_ms(), last_display_refresh
+                    ) >= SCREEN_STATUS_REFRESH_MS
+                    if (
+                        state_changed
+                        or rendered_ui_revision != ui_revision
+                        or (ui_view == UI_HOME and refresh_due)
+                    ):
+                        draw_ui(temperature)
+                        oled.show()
+                        rendered_ui_revision = ui_revision
+                        last_display_refresh = time.ticks_ms()
+                last_display_error = None
+            except Exception as e:
+                last_display_error = time.ticks_ms()
+                print("Error updating display:", e)
 
         try:
             # Calculate values once for LED updates
